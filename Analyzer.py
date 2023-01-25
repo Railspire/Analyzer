@@ -66,6 +66,7 @@ with open(os.path.join(log_path,log_name), 'r') as data:
     for line in data:
         ii+=1
         if ii < len(data):
+            #print(ii)
             mqtt_line_list.append(line)
             if 'NCL/msm/operation_update' in line:
                 jsonline = json.loads(line)
@@ -84,10 +85,11 @@ with open(os.path.join(log_path,log_name), 'r') as data:
                         Paused_Flag = False
                     op_update_line_list.append(['op_start', ii, msm_operation_update_data['type'],op_counter, mission_counter])
             if 'NCL/ose/state' in line:
+                #msm_operation_update_data = jsonline['payload']
                 jsonline = json.loads(line)
                 ose_state = jsonline['payload']['state']
                 if ose_state == 'done':
-                    op_update_line_list.append(['op_end', ii, msm_operation_update_data['type'], op_counter, mission_counter])
+                    op_update_line_list.append(['op_end', ii,'ose-state', op_counter, mission_counter])
             if 'NCL/msm/state' in line:
                 jsonline = json.loads(line)
                 msm_state = jsonline['payload']['state']
@@ -102,8 +104,16 @@ with open(os.path.join(log_path,log_name), 'r') as data:
                     # mission = jsonline['payload']['payload']
                     op_counter = 0
                     mission_list.append(mission)
-                if jsonline['payload']['type'] == 'OCUTx':
-                    jsonline = json.loads(line)
+                #if jsonline['payload']['type'] == 'OCUTx':
+                    #jsonline = json.loads(line)
+                    #if 'LocomotiveStatus' in jsonline['payload']['Payload']:
+                        #ocutx_payload = jsonline['payload']['Payload']
+                        #ocutx_payload.replace("\\","")
+                        #jsonocutx_payload = json.loads(ocutx_payload)
+                        #print(jsonocutx_payload)
+                        #chainage_ft = jsonocutx_payload['Payload']['Chainage Ft']
+                        #chainage_ft_list.append(chainage_ft)
+                        #print(chainage_ft)
                     if 'Mission State' in jsonline['payload']['Payload']:
                         ocutx_payload = jsonline['payload']['Payload']
                         ocutx_payload.replace("\\","")
@@ -145,12 +155,22 @@ with open(os.path.join(log_path,log_name), 'r') as data:
                                 #pass
 
 print(op_update_line_list)
+try: 
+    print(op_update_line_list[-1][0])
+    if op_update_line_list[-1][0] == 'op_start':
+        print('force', ii)
+        op_update_line_list.append(['op_end', ii, 'forced', op_counter, mission_counter])
+except IndexError:
+    print('No Ops')
+    pass
+print(op_update_line_list)
 #Pairing Operation Beginning and Ends
 print('Parsing Operations')
 op_start = None
 op_end = None
 line_pair_list = []
 for ndx, op_state in enumerate(op_update_line_list):
+    #print(ndx)
     #print(op_update_line_list)
     op_start_or_end = op_state[0]
     op_line = op_state[1]
@@ -163,13 +183,18 @@ for ndx, op_state in enumerate(op_update_line_list):
     if op_start_or_end == 'op_end':
         if op_end is None:
             op_end = op_line
-            if op_end-op_start > 2500000:
-                print('Passing Mission Number {} due to length {}'.format(mission_number, (op_end-op_start)))
+            try:
+                if op_end-op_start > 2500000:
+                    #print('Passing Mission Number {} due to length {}'.format(mission_number, (op_end-op_start)))
+                    pass
+            except TypeError:
                 pass
             else:
                 line_pair_list.append([op_start - 1, op_end -1, operation_number, mission_number])
             op_start = None
             op_end = None
+        if op_start == None:
+            pass 
 
 #Storing Data for Inidividual Operations
 print('Storing Operation Data')
@@ -254,6 +279,8 @@ for file in operation_filenames:
     ignore_mission_flag = False
     stop_flag = False
     unprocessed_command_flag = False
+    chainage_ft_list = []
+    ocu_tx_data_list = []
     for line in data:
         ii+=1
         if ii < len(data):
@@ -340,6 +367,24 @@ for file in operation_filenames:
                         #chainage_list.append(chainage_data)
                     #except:
                         #pass
+            if 'NCL/interface' in line:
+                #jsonline = json.loads(line)
+            #if jsonline['payload']['type'] == 'Mission':
+                #mission = jsonline['payload']['Payload']
+                # mission = jsonline['payload']['payload']
+                #op_counter = 0
+                #mission_list.append(mission)
+                if jsonline['payload']['type'] == 'OCUTx':
+                    jsonline = json.loads(line)
+                    if 'LocomotiveStatus' in jsonline['payload']['Payload']:
+                        ocutx_payload = jsonline['payload']['Payload']
+                        ocutx_payload.replace("\\","")
+                        jsonocutx_payload = json.loads(ocutx_payload)
+                        ocu_tx_data_list.append(jsonocutx_payload['Payload'])
+                        print(jsonocutx_payload)
+                        chainage_ft = jsonocutx_payload['Payload']['Chainage Ft']
+                        chainage_ft_list.append(chainage_ft)
+                        print(chainage_ft)
 
             #Command vs Response Data
             # ToDo Combine Command vs Response with rest of loop by section title
@@ -373,7 +418,7 @@ for file in operation_filenames:
                     tdctime = datetime.timestamp(tdctime)
                     try:
                         tdcposition = train.profile.get_position_from_lat_long(gps_data['latitude_deg'], gps_data['longitude_deg'])
-                    except AttributeError:
+                    except (AttributeError, NameError):
                         pass
                     tdc = jsonline['payload']
                     tdccount += 1
@@ -533,6 +578,12 @@ for file in operation_filenames:
     elevation_interp = ['1']
     elevation_interp_df = pd.DataFrame(elevation_interp)
     elevation_interp_df.columns = ['elevation_interp']
+    
+    chainage_ft_df = pd.DataFrame(chainage_ft_list, columns=['chainage_ft'])
+    
+    ocu_tx_df = pd.DataFrame(ocu_tx_data_list)
+    ocu_tx_df = ocu_tx_df.add_prefix('ocu_tx_')
+    
 
     #Merging DataFrames
     df2 = status_df.join(oseinfodf, how='left')
@@ -549,7 +600,9 @@ for file in operation_filenames:
     df13 = df12.join(valid_speed_data_df, how='left')
     #df13 = df12.join(elevation_df,how='left')
     #df14 = df13.join(elevation_interp_df, how='left')
-    df = df13
+    df14 = df13.join(chainage_ft_df, how='left')
+    df15 = df14.join(ocu_tx_df, how = 'left')
+    df = df15
 
     #Saving Data as CSV
     df.to_csv('CSV_Data/{}-Dynamics_Data.csv'.format(file.strip('-data.txt')), index=True)
@@ -557,6 +610,7 @@ for file in operation_filenames:
     try:
         #Position Data
         chainage = df['chainage']
+        chainage_ft = df['chainage_ft']
         oseinfopos = df['ose_info_chainage'][0]
 
         #Time
@@ -758,7 +812,22 @@ for file in operation_filenames:
         acceleration_tplot_TOOLTIPS = [("x", "$x{0.00}"),("y", "$y{0.00}")]
         acceleration_tplot.add_tools(HoverTool(tooltips=acceleration_tplot_TOOLTIPS))
         acceleration_tplot.grid.grid_line_width = 0.5
-        p = gridplot([[speed_cplot, brake_cplot, notch_cplot], [force_cplot, acceleration_cplot],[speed_tplot, brake_tplot, notch_tplot], [force_tplot, acceleration_tplot]])
+        
+        position_tplot = figure(title="Position vs Time", x_axis_label='Time [ms]', y_axis_label='Position [ft]')
+        #position_tplot.y_range = Range1d(start=0, end=8)
+        #notcht_plot.extra_y_ranges = {"y2": Range1d(start=min(elevation),end=max(elevation))}
+        #notcht_plot.add_layout(LinearAxis(y_range_name="y2"), 'right')
+        position_tplot.add_layout(Legend(), 'below')
+        position_tplot.legend.click_policy="hide"
+        position_tplot.scatter(time, chainage, legend_label="Position", line_width=3, color = "red")
+        position_tplot.scatter(time, chainage_ft, legend_label="Position_bill", line_width=3, color = "black")
+        #notcht_plot.line(time, elevation, color="grey", y_range_name="y2")
+        position_tplot_TOOLTIPS = [("x", "$x{0.00}"),("y", "$y{0}")]
+        position_tplot.add_tools(HoverTool(tooltips=notch_tplot_TOOLTIPS))
+        position_tplot.grid.grid_line_width = 0.5
+        
+        
+        p = gridplot([[speed_cplot, brake_cplot, notch_cplot], [force_cplot, acceleration_cplot],[speed_tplot, brake_tplot, notch_tplot], [force_tplot, acceleration_tplot, position_tplot]])
         output_file(filename="custom_filename.html", title="Static HTML file")
         save(p, 'HTML_Plots/{}-html_plot.html'.format(file.strip('-data.txt')))
 
@@ -836,7 +905,7 @@ for ndx, item in enumerate(last_lccmtx_position_list):
 #Initializing plotting variables
 difflist_index = np.arange(0, len(difflist))
 lccmtx_and_tdc_diff_plot = figure(title="Time Difference Between Lccmtx and TDC After Notch Change", x_axis_label='Index', y_axis_label='Time [s]')
-lccmtx_and_tdc_diff_plot.y_range = Range1d(start=min(difflist), end=max(difflist))
+#lccmtx_and_tdc_diff_plot.y_range = Range1d(start=min(difflist), end=max(difflist))
 lccmtx_and_tdc_diff_plot.add_layout(Legend(), 'below')
 lccmtx_and_tdc_diff_plot.line(difflist_index, difflist)
 lccmtx_and_tdc_diff_plot_TOOLTIPS = [("x", "$x{0.00}"), ("y", "$y{0.00}")]
